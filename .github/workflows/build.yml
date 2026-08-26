@@ -96,6 +96,7 @@ jobs:
 
       - name: Publish versioned release
         if: steps.meta.outputs.mode == 'versioned'
+        working-directory: self
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
@@ -109,6 +110,7 @@ jobs:
 
       - name: Publish / roll nightly prerelease
         if: steps.meta.outputs.mode == 'nightly'
+        working-directory: self
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: nightly
