@@ -33,11 +33,26 @@ BIN_DIR="${WORK}/.zig-bin"
 mkdir -p "${BIN_DIR}"
 cat > "${BIN_DIR}/zigcc" <<'ZIG'
 #!/bin/sh
-exec zig cc -target x86_64-linux-gnu.2.17 "$@"
+# Drop any --target/-target passed by cc-rs, then force glibc 2.17 target.
+filtered=""
+for a in "$@"; do
+  case "$a" in
+    -target|--target=*) ;;
+    *) filtered="$filtered $a" ;;
+  esac
+done
+exec zig cc -target x86_64-linux-gnu.2.17 $filtered
 ZIG
 cat > "${BIN_DIR}/zigcxx" <<'ZIG'
 #!/bin/sh
-exec zig c++ -target x86_64-linux-gnu.2.17 "$@"
+filtered=""
+for a in "$@"; do
+  case "$a" in
+    -target|--target=*) ;;
+    *) filtered="$filtered $a" ;;
+  esac
+done
+exec zig c++ -target x86_64-linux-gnu.2.17 $filtered
 ZIG
 cat > "${BIN_DIR}/zig-ar" <<'ZIG'
 #!/bin/sh
