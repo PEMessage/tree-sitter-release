@@ -44,3 +44,5 @@ RUN export CFLAGS="-D_GNU_SOURCE" \
 # Minimal final image carrying only the binary.
 FROM scratch
 COPY --from=builder /build/target/release/tree-sitter /tree-sitter
+# A command is required so `docker create` works (used only to extract the binary).
+CMD ["/tree-sitter", "--help"]
