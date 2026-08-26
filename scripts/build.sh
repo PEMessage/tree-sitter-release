@@ -36,6 +36,10 @@ echo "==> Building tree-sitter CLI"
 # le16toh/be16toh and rejects -Wl,--dynamic-list (needed for runtime grammar
 # loading). The base image's glibc is 2.17, so the result still targets 2.17.
 export RUSTFLAGS="-C linker=cc -C link-arg=-fuse-ld=bfd"
+# glibc 2.17 only exposes le16toh/be16toh as macros under _GNU_SOURCE; without
+# it the C compile references an undefined symbol at link time.
+export CFLAGS="-D_GNU_SOURCE"
+export CXXFLAGS="-D_GNU_SOURCE"
 cargo build --release --bin tree-sitter
 
 SRC="${WORK}/target/release/tree-sitter"
