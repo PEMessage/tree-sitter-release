@@ -1,0 +1,131 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "tree-sitter ref to build (tag / branch / sha)"
+        required: true
+        default: "master"
+  workflow_call:
+    inputs:
+      ref:
+        description: "tree-sitter ref to build"
+        required: false
+        default: "master"
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  ZIG_VERSION: "0.13.0"
+
+jobs:
+  build:
+    # x86_64 only — no build matrix.
+    runs-on: ubuntu-22.04
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout this repo (build script)
+        uses: actions/checkout@v4
+        with:
+          path: self
+
+      - name: Install build dependencies (clang / libclang for bindgen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev curl xz-utils
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install zig (pinned)
+        run: |
+          ZIG="zig-linux-x86_64-${ZIG_VERSION}"
+          curl -fSL "https://ziglang.org/download/${ZIG_VERSION}/${ZIG}.tar.xz" \
+            | sudo tar -xJ -C /opt
+          sudo ln -sf "/opt/${ZIG}/zig" /usr/local/bin/zig
+          zig version
+
+      - name: Determine build mode
+        id: meta
+        env:
+          REF: ${{ github.event.inputs.ref || inputs.ref || 'master' }}
+        run: |
+          REF="${REF}"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          # Versioned release if ref looks like a semver tag (v0.25.10 / 0.25.10)
+          if echo "${REF}" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+            VER="${REF#v}"
+            echo "mode=versioned" >> "$GITHUB_OUTPUT"
+            echo "tag=v${VER}"     >> "$GITHUB_OUTPUT"
+            echo "asset=tree-sitter-v${VER}-linux-x86_64.gz" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            DATE="$(date -u +%Y%m%d)"
+            SHA="$(curl -fsSL "https://api.github.com/repos/tree-sitter/tree-sitter/commits/${REF}" \
+                    | grep -m1 '"sha"' | sed -E 's/.*"sha": *"([0-9a-f]+)".*/\1/' | cut -c1-10)"
+            echo "mode=nightly" >> "$GITHUB_OUTPUT"
+            echo "tag=nightly"  >> "$GITHUB_OUTPUT"
+            echo "asset=tree-sitter-nightly-linux-x86_64.gz" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "nightly_date=${DATE}" >> "$GITHUB_OUTPUT"
+            echo "nightly_sha=${SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build tree-sitter (glibc 2.17)
+        run: |
+          self/scripts/build.sh "${{ steps.meta.outputs.ref }}" "${{ runner.temp }}/tree-sitter"
+
+      - name: Package
+        run: |
+          gzip -9 -c "${{ runner.temp }}/tree-sitter" \
+            > "${{ runner.temp }}/${{ steps.meta.outputs.asset }}"
+          ls -lh "${{ runner.temp }}/${{ steps.meta.outputs.asset }}"
+
+      - name: Verify glibc requirement
+        run: |
+          echo "==> ELF interpreter / glibc symbols"
+          readelf -l "${{ runner.temp }}/tree-sitter" | grep -i interpreter || true
+          objdump -T "${{ runner.temp }}/tree-sitter" 2>/dev/null \
+            | grep -oE 'GLIBC_[0-9.]+' | sort -V -u || true
+
+      - name: Publish versioned release
+        if: steps.meta.outputs.mode == 'versioned'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          ASSET: ${{ runner.temp }}/${{ steps.meta.outputs.asset }}
+          NAME: ${{ steps.meta.outputs.asset }}
+        run: |
+          gh release delete "${TAG}" --yes || true
+          gh release create "${TAG}" "${ASSET}#${NAME}" \
+            --title "${TAG}" \
+            --notes "Prebuilt tree-sitter CLI (x86_64, glibc >= 2.17). Source: tree-sitter/tree-sitter @ ${TAG}."
+
+      - name: Publish / roll nightly prerelease
+        if: steps.meta.outputs.mode == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: nightly
+          ASSET: ${{ runner.temp }}/${{ steps.meta.outputs.asset }}
+          NAME: ${{ steps.meta.outputs.asset }}
+          DATE: ${{ steps.meta.outputs.nightly_date }}
+          SHA: ${{ steps.meta.outputs.nightly_sha }}
+        run: |
+          git tag -f "${TAG}"
+          git push -f origin "${TAG}"
+          gh release delete "${TAG}" --yes || true
+          gh release create "${TAG}" "${ASSET}#${NAME}" \
+            --title "nightly ${DATE} (${SHA})" \
+            --prerelease \
+            --notes "Nightly prerelease build (x86_64, glibc >= 2.17). Source: tree-sitter/tree-sitter @ ${SHA}."

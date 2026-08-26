@@ -1,0 +1,7 @@
+# Build artifacts
+target/
+*.gz
+tree-sitter
+
+# Editor / OS
+.DS_Store
