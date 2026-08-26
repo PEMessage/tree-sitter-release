@@ -32,6 +32,10 @@ cd "${WORK}"
 echo "==> Building tree-sitter CLI"
 # shellcheck disable=SC1090
 . "$HOME/.cargo/env"
+# Force the system GNU linker (bfd), not rust-lld: rust-lld can't resolve
+# le16toh/be16toh and rejects -Wl,--dynamic-list (needed for runtime grammar
+# loading). The base image's glibc is 2.17, so the result still targets 2.17.
+export RUSTFLAGS="-C linker=cc -C link-arg=-fuse-ld=bfd"
 cargo build --release --bin tree-sitter
 
 SRC="${WORK}/target/release/tree-sitter"
