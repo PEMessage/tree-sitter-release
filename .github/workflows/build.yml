@@ -28,10 +28,8 @@ jobs:
         shell: bash
 
     steps:
-      - name: Checkout this repo (build script)
+      - name: Checkout this repo (Dockerfile)
         uses: actions/checkout@v4
-        with:
-          path: self
 
       - name: Determine build mode
         id: meta
@@ -60,25 +58,13 @@ jobs:
           fi
 
       - name: Build tree-sitter in manylinux2014 (glibc 2.17)
-        # manylinux2014 == CentOS 7, glibc 2.17. We run the build inside this
-        # container (via docker on the host) because the runner's node/gh need a
-        # newer glibc; only the compile happens in the old environment.
-        env:
-          REF: ${{ steps.meta.outputs.ref }}
+        # Build lives entirely in the Dockerfile; the host only runs docker
+        # (the runner's node/gh need a newer glibc than 2.17).
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}/self":/self:ro \
-            -v "${{ runner.temp }}":/out \
-            quay.io/pypa/manylinux2014_x86_64:latest \
-            bash -c "
-              set -e
-              yum install -y git curl >/dev/null 2>&1 || true
-              echo \"base glibc: \$(ldd --version | head -1)\"
-              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-                | sh -s -- -y --profile minimal
-              export PATH=\$HOME/.cargo/bin:\$PATH
-              /self/scripts/build.sh ${REF} /out/tree-sitter
-            "
+          docker build -t tree-sitter-builder --build-arg "REF=${{ steps.meta.outputs.ref }}" .
+          CID="$(docker create tree-sitter-builder)"
+          docker cp "${CID}:/tree-sitter" "${{ runner.temp }}/tree-sitter"
+          docker rm "${CID}"
 
       - name: Package
         run: |
@@ -96,7 +82,6 @@ jobs:
 
       - name: Publish versioned release
         if: steps.meta.outputs.mode == 'versioned'
-        working-directory: self
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
@@ -110,7 +95,6 @@ jobs:
 
       - name: Publish / roll nightly prerelease
         if: steps.meta.outputs.mode == 'nightly'
-        working-directory: self
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: nightly
