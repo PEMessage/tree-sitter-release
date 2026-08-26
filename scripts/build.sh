@@ -28,10 +28,27 @@ git clone --depth 1 --branch "${REF}" https://github.com/tree-sitter/tree-sitter
 cd "${WORK}"
 
 echo "==> Configuring zig as linker (target x86_64-linux-gnu.2.17)"
-export AR="zig ar"
-export CC="zig cc -target x86_64-linux-gnu.2.17"
-export CXX="zig c++ -target x86_64-linux-gnu.2.17"
-export RUSTFLAGS="-C linker=zig cc -C link-arg=-target -C link-arg=x86_64-linux-gnu.2.17"
+ZIG_TARGET="x86_64-linux-gnu.2.17"
+BIN_DIR="${WORK}/.zig-bin"
+mkdir -p "${BIN_DIR}"
+cat > "${BIN_DIR}/zigcc" <<'ZIG'
+#!/bin/sh
+exec zig cc -target x86_64-linux-gnu.2.17 "$@"
+ZIG
+cat > "${BIN_DIR}/zigcxx" <<'ZIG'
+#!/bin/sh
+exec zig c++ -target x86_64-linux-gnu.2.17 "$@"
+ZIG
+cat > "${BIN_DIR}/zig-ar" <<'ZIG'
+#!/bin/sh
+exec zig ar "$@"
+ZIG
+chmod +x "${BIN_DIR}/zigcc" "${BIN_DIR}/zigcxx" "${BIN_DIR}/zig-ar"
+
+export AR="${BIN_DIR}/zig-ar"
+export CC="${BIN_DIR}/zigcc"
+export CXX="${BIN_DIR}/zigcxx"
+export RUSTFLAGS="-C linker=${BIN_DIR}/zigcc"
 
 echo "==> Building tree-sitter CLI"
 # shellcheck disable=SC1090
