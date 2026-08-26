@@ -2,8 +2,10 @@
 #
 # Build the tree-sitter CLI binary, linked against glibc 2.17 (CentOS 7+).
 #
-# Uses `zig cc` purely as the linker so the produced x86_64 binary runs on any
-# system with glibc >= 2.17. No cargo-zigbuild / extra rust target needed.
+# This is meant to run inside a manylinux2014 (CentOS 7) container, whose
+# glibc is 2.17. Building there yields a binary that runs on any system with
+# glibc >= 2.17. GNU ld (not lld) is required because tree-sitter-cli passes
+# -Wl,--dynamic-list for runtime grammar loading, which zig's lld rejects.
 #
 # Usage:
 #   scripts/build.sh <tree-sitter-ref> [output-path]
@@ -26,44 +28,6 @@ git clone --depth 1 --branch "${REF}" https://github.com/tree-sitter/tree-sitter
        && git -C "${WORK}" checkout "${REF}"; }
 
 cd "${WORK}"
-
-echo "==> Configuring zig as linker (target x86_64-linux-gnu.2.17)"
-ZIG_TARGET="x86_64-linux-gnu.2.17"
-BIN_DIR="${WORK}/.zig-bin"
-mkdir -p "${BIN_DIR}"
-cat > "${BIN_DIR}/zigcc" <<'ZIG'
-#!/bin/sh
-# Drop any --target/-target passed by cc-rs, then force glibc 2.17 target.
-filtered=""
-for a in "$@"; do
-  case "$a" in
-    -target|--target=*) ;;
-    *) filtered="$filtered $a" ;;
-  esac
-done
-exec zig cc -target x86_64-linux-gnu.2.17 $filtered
-ZIG
-cat > "${BIN_DIR}/zigcxx" <<'ZIG'
-#!/bin/sh
-filtered=""
-for a in "$@"; do
-  case "$a" in
-    -target|--target=*) ;;
-    *) filtered="$filtered $a" ;;
-  esac
-done
-exec zig c++ -target x86_64-linux-gnu.2.17 $filtered
-ZIG
-cat > "${BIN_DIR}/zig-ar" <<'ZIG'
-#!/bin/sh
-exec zig ar "$@"
-ZIG
-chmod +x "${BIN_DIR}/zigcc" "${BIN_DIR}/zigcxx" "${BIN_DIR}/zig-ar"
-
-export AR="${BIN_DIR}/zig-ar"
-export CC="${BIN_DIR}/zigcc"
-export CXX="${BIN_DIR}/zigcxx"
-export RUSTFLAGS="-C linker=${BIN_DIR}/zigcc"
 
 echo "==> Building tree-sitter CLI"
 # shellcheck disable=SC1090
