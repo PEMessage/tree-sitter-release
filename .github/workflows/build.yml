@@ -122,8 +122,9 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
             DATE="$(date -u +%Y%m%d)"
-            SHA="$(curl -fsSL "https://api.github.com/repos/tree-sitter/tree-sitter/commits/${REF}" \
-                    | grep -m1 '"sha"' | sed -E 's/.*"sha": *"([0-9a-f]+)".*/\1/' | cut -c1-10)"
+            RESP="$(curl -fsSL --retry 5 --retry-all-errors \
+                     "https://api.github.com/repos/tree-sitter/tree-sitter/commits/${REF}")"
+            SHA="$(printf '%s' "${RESP}" | grep -m1 '"sha"' | sed -E 's/.*"sha": *"([0-9a-f]+)".*/\1/' | cut -c1-10)"
             echo "mode=nightly" >> "$GITHUB_OUTPUT"
             echo "tag=nightly"  >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
