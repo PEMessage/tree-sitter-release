@@ -38,12 +38,15 @@ RUN yum install -y git curl >/dev/null 2>&1 || true
 
 # Install Rust (explicit host target — see header note on uname/rustup).
 # PATH must be set in-line: the ENV PATH below only applies to later RUNs.
+# RUSTUP_TOOLCHAIN forces the toolchain for every cargo/rustc call; `rustup
+# default` can't be used because rustup refuses to make a non-host toolchain
+# the default for i686.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --profile minimal \
  && export PATH="/root/.cargo/bin:${PATH}" \
- && rustup toolchain install "stable-${RUST_TARGET}" --profile minimal --force-non-host \
- && rustup default "stable-${RUST_TARGET}"
-ENV PATH="/root/.cargo/bin:${PATH}"
+ && rustup toolchain install "stable-${RUST_TARGET}" --profile minimal --force-non-host
+ENV PATH="/root/.cargo/bin:${PATH}" \
+    RUSTUP_TOOLCHAIN="stable-${RUST_TARGET}"
 
 WORKDIR /build
 
