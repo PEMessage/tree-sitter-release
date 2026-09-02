@@ -27,12 +27,16 @@
 ARG REF=master
 ARG TARGET_ARCH=x86_64
 ARG RUST_TARGET=x86_64-unknown-linux-gnu
+# i686 can't compile quickjs (rquickjs-sys) C code for 32-bit, so build the
+# CLI without its default qjs-rt (embedded JS) feature there.
+ARG SKIP_QJS=0
 
 FROM quay.io/pypa/manylinux2014_${TARGET_ARCH}:latest AS builder
 
 ARG REF
 ARG RUST_TARGET
-ENV REF="${REF}" RUST_TARGET="${RUST_TARGET}"
+ARG SKIP_QJS
+ENV REF="${REF}" RUST_TARGET="${RUST_TARGET}" SKIP_QJS="${SKIP_QJS}"
 
 RUN yum install -y git curl >/dev/null 2>&1 || true
 
@@ -60,7 +64,11 @@ RUN git clone --depth 1 --branch "${REF}" https://github.com/tree-sitter/tree-si
 RUN export CFLAGS="-D_GNU_SOURCE" \
  && export CXXFLAGS="-D_GNU_SOURCE" \
  && export RUSTFLAGS="-C linker=cc -C link-arg=-fuse-ld=bfd" \
- && cargo build --release --bin tree-sitter \
+ && if [ "${SKIP_QJS}" = "1" ]; then \
+      cargo build --release --bin tree-sitter --no-default-features; \
+    else \
+      cargo build --release --bin tree-sitter; \
+    fi \
  && strip target/release/tree-sitter
 
 # Minimal final image carrying only the binary.

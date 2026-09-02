@@ -54,10 +54,14 @@ jobs:
             x86_64|i686|aarch64) RUST="${ARCH}-unknown-linux-gnu" ;;
             *) echo "unsupported arch: ${ARCH}"; exit 1 ;;
           esac
+          # quickjs (qjs-rt) can't compile for 32-bit i686; build without it there.
+          SKIP_QJS=0
+          [ "${ARCH}" = "i686" ] && SKIP_QJS=1
           docker build -t "tree-sitter-builder-${ARCH}" \
             --build-arg "REF=${REF}" \
             --build-arg "TARGET_ARCH=${ARCH}" \
-            --build-arg "RUST_TARGET=${RUST}" .
+            --build-arg "RUST_TARGET=${RUST}" \
+            --build-arg "SKIP_QJS=${SKIP_QJS}" .
           CID="$(docker create "tree-sitter-builder-${ARCH}")"
           docker cp "${CID}:/tree-sitter" "${{ runner.temp }}/tree-sitter"
           docker rm "${CID}"
