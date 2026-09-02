@@ -41,7 +41,7 @@ RUN yum install -y git curl >/dev/null 2>&1 || true
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --profile minimal \
  && export PATH="/root/.cargo/bin:${PATH}" \
- && rustup toolchain install "stable-${RUST_TARGET}" --profile minimal \
+ && rustup toolchain install "stable-${RUST_TARGET}" --profile minimal --force-non-host \
  && rustup default "stable-${RUST_TARGET}"
 ENV PATH="/root/.cargo/bin:${PATH}"
 
