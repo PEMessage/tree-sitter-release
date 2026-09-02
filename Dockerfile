@@ -6,15 +6,23 @@
 # GNU ld (bfd) is forced because rust-lld can't resolve le16toh/be16toh and
 # rejects -Wl,--dynamic-list (needed for runtime grammar loading).
 #
+# manylinux2014 supports the following architectures (TARGET_ARCH):
+#   x86_64  : 64-bit Intel/AMD
+#   i686    : 32-bit Intel/AMD
+#   aarch64 : 64-bit ARM (AWS Graviton, Raspberry Pi 4, ...)
+#   armv7l  : 32-bit ARM hard-float
+# (manylinux2014 also ships ppc64/ppc64le/s390x images.)
+#
 # Build:
-#   docker build -t ts --build-arg REF=v0.25.10 .
+#   docker build -t ts --build-arg REF=v0.25.10 --build-arg TARGET_ARCH=aarch64 .
 #   id=$(docker create ts); docker cp "$id":/tree-sitter ./tree-sitter; docker rm "$id"
 #
 # REF may be a tag (v0.25.10), branch (master) or sha.
 
 ARG REF=master
+ARG TARGET_ARCH=x86_64
 
-FROM quay.io/pypa/manylinux2014_x86_64:latest AS builder
+FROM quay.io/pypa/manylinux2014_${TARGET_ARCH}:latest AS builder
 
 ARG REF
 ENV REF="${REF}"

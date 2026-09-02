@@ -20,7 +20,15 @@ permissions:
 
 jobs:
   build:
-    # x86_64 only — no build matrix.
+    # manylinux2014 (glibc 2.17) supports these arches (see Dockerfile):
+    #   x86_64  : 64-bit Intel/AMD
+    #   i686    : 32-bit Intel/AMD
+    #   aarch64 : 64-bit ARM (AWS Graviton, Raspberry Pi 4, ...)
+    #   armv7l  : 32-bit ARM hard-float
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, i686, aarch64, armv7l]
     runs-on: ubuntu-22.04
 
     defaults:
@@ -30,6 +38,64 @@ jobs:
     steps:
       - name: Checkout this repo (Dockerfile)
         uses: actions/checkout@v4
+
+      - name: Set up QEMU for foreign-arch builds (aarch64 / armv7l)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build tree-sitter in manylinux2014 (glibc 2.17)
+        # Build lives entirely in the Dockerfile; the host only runs docker
+        # (the runner's node/gh need a newer glibc than 2.17).
+        env:
+          REF: ${{ github.event.inputs.ref || inputs.ref || 'master' }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker build -t "tree-sitter-builder-${ARCH}" \
+            --build-arg "REF=${REF}" \
+            --build-arg "TARGET_ARCH=${ARCH}" .
+          CID="$(docker create "tree-sitter-builder-${ARCH}")"
+          docker cp "${CID}:/tree-sitter" "${{ runner.temp }}/tree-sitter"
+          docker rm "${CID}"
+
+      - name: Package
+        run: |
+          gzip -9 -c "${{ runner.temp }}/tree-sitter" \
+            > "${{ runner.temp }}/tree-sitter-linux-${{ matrix.arch }}.gz"
+          ls -lh "${{ runner.temp }}/tree-sitter-linux-${{ matrix.arch }}.gz"
+
+      - name: Verify glibc requirement
+        run: |
+          echo "==> ELF interpreter"
+          readelf -l "${{ runner.temp }}/tree-sitter" | grep -i interpreter || true
+          echo "==> Highest GLIBC symbol version needed"
+          objdump -T "${{ runner.temp }}/tree-sitter" 2>/dev/null \
+            | grep -oE 'GLIBC_[0-9.]+' | sort -V -u || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tree-sitter-${{ matrix.arch }}
+          path: ${{ runner.temp }}/tree-sitter-linux-${{ matrix.arch }}.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout this repo (for tag pushes)
+        uses: actions/checkout@v4
+
+      - name: Download all arch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Determine build mode
         id: meta
@@ -43,7 +109,6 @@ jobs:
             VER="${REF#v}"
             echo "mode=versioned" >> "$GITHUB_OUTPUT"
             echo "tag=v${VER}"     >> "$GITHUB_OUTPUT"
-            echo "asset=tree-sitter-v${VER}-linux-x86_64.gz" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
             DATE="$(date -u +%Y%m%d)"
@@ -51,62 +116,34 @@ jobs:
                     | grep -m1 '"sha"' | sed -E 's/.*"sha": *"([0-9a-f]+)".*/\1/' | cut -c1-10)"
             echo "mode=nightly" >> "$GITHUB_OUTPUT"
             echo "tag=nightly"  >> "$GITHUB_OUTPUT"
-            echo "asset=tree-sitter-nightly-linux-x86_64.gz" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "nightly_date=${DATE}" >> "$GITHUB_OUTPUT"
             echo "nightly_sha=${SHA}" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Build tree-sitter in manylinux2014 (glibc 2.17)
-        # Build lives entirely in the Dockerfile; the host only runs docker
-        # (the runner's node/gh need a newer glibc than 2.17).
-        run: |
-          docker build -t tree-sitter-builder --build-arg "REF=${{ steps.meta.outputs.ref }}" .
-          CID="$(docker create tree-sitter-builder)"
-          docker cp "${CID}:/tree-sitter" "${{ runner.temp }}/tree-sitter"
-          docker rm "${CID}"
-
-      - name: Package
-        run: |
-          gzip -9 -c "${{ runner.temp }}/tree-sitter" \
-            > "${{ runner.temp }}/${{ steps.meta.outputs.asset }}"
-          ls -lh "${{ runner.temp }}/${{ steps.meta.outputs.asset }}"
-
-      - name: Verify glibc requirement
-        run: |
-          echo "==> ELF interpreter"
-          readelf -l "${{ runner.temp }}/tree-sitter" | grep -i interpreter || true
-          echo "==> Highest GLIBC symbol version needed"
-          objdump -T "${{ runner.temp }}/tree-sitter" 2>/dev/null \
-            | grep -oE 'GLIBC_[0-9.]+' | sort -V -u || true
 
       - name: Publish versioned release
         if: steps.meta.outputs.mode == 'versioned'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
-          ASSET: ${{ runner.temp }}/${{ steps.meta.outputs.asset }}
-          NAME: ${{ steps.meta.outputs.asset }}
         run: |
           gh release delete "${TAG}" --yes || true
-          gh release create "${TAG}" "${ASSET}#${NAME}" \
+          gh release create "${TAG}" dist/*.gz \
             --title "${TAG}" \
-            --notes "Prebuilt tree-sitter CLI (x86_64, glibc >= 2.17). Source: tree-sitter/tree-sitter @ ${TAG}."
+            --notes "Prebuilt tree-sitter CLI (manylinux2014, glibc >= 2.17): x86_64, i686, aarch64, armv7l. Source: tree-sitter/tree-sitter @ ${TAG}."
 
       - name: Publish / roll nightly prerelease
         if: steps.meta.outputs.mode == 'nightly'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: nightly
-          ASSET: ${{ runner.temp }}/${{ steps.meta.outputs.asset }}
-          NAME: ${{ steps.meta.outputs.asset }}
           DATE: ${{ steps.meta.outputs.nightly_date }}
           SHA: ${{ steps.meta.outputs.nightly_sha }}
         run: |
           git tag -f "${TAG}"
           git push -f origin "${TAG}"
           gh release delete "${TAG}" --yes || true
-          gh release create "${TAG}" "${ASSET}#${NAME}" \
+          gh release create "${TAG}" dist/*.gz \
             --title "nightly ${DATE} (${SHA})" \
             --prerelease \
-            --notes "Nightly prerelease build (x86_64, glibc >= 2.17). Source: tree-sitter/tree-sitter @ ${SHA}."
+            --notes "Nightly prerelease build (manylinux2014, glibc >= 2.17): x86_64, i686, aarch64, armv7l. Source: tree-sitter/tree-sitter @ ${SHA}."
