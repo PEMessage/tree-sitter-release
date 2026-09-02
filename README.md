@@ -8,6 +8,8 @@ native glibc is 2.17, so the result runs on any glibc ≥ 2.17 system. GNU ld
 (bfd) is used (not rust-lld) because rust-lld can't resolve `le16toh`/`be16toh`
 and rejects `-Wl,--dynamic-list` (needed for runtime grammar loading).
 
+Inspired by [neovim/neovim-releases](https://github.com/neovim/neovim-releases).
+
 ## Usage
 
 ```sh
@@ -35,6 +37,32 @@ grammars, so keep `gcc`/`clang` available on the target machine.
 docker build -t ts --build-arg REF=v0.25.10 .
 id=$(docker create ts)
 docker cp "$id":/tree-sitter ./tree-sitter
-docker rm "$id"
-
 ./tree-sitter --version
+```
+
+## Install with mason.nvim
+
+A custom registry
+([`PEMessage/mason-reg`](https://github.com/PEMessage/mason-reg)) provides a
+`tree-sitter-cli` package built from these releases. Add it to your
+`mason.nvim` setup, then install it like any other tool:
+
+```lua
+{
+  "williamboman/mason.nvim",
+  cmd = "Mason",
+  event = "VeryLazy",
+  opts = {
+    registries = {
+      "github:PEMessage/mason-reg",
+      "github:mason-org/mason-registry",
+    },
+  },
+}
+```
+
+Then run:
+
+```sh
+:MasonInstall tree-sitter-release
+```
