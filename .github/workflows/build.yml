@@ -20,15 +20,15 @@ permissions:
 
 jobs:
   build:
-    # manylinux2014 (glibc 2.17) supports these arches (see Dockerfile):
+    # manylinux2014 (glibc 2.17) supports these arches (see Dockerfile).
     #   x86_64  : 64-bit Intel/AMD
     #   i686    : 32-bit Intel/AMD
     #   aarch64 : 64-bit ARM (AWS Graviton, Raspberry Pi 4, ...)
-    #   armv7l  : 32-bit ARM hard-float
+    # (armv7l is excluded — pypa publishes no manylinux2014_armv7l image.)
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, i686, aarch64, armv7l]
+        arch: [x86_64, i686, aarch64]
     runs-on: ubuntu-22.04
 
     defaults:
@@ -39,7 +39,7 @@ jobs:
       - name: Checkout this repo (Dockerfile)
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for foreign-arch builds (aarch64 / armv7l)
+      - name: Set up QEMU for foreign-arch builds (aarch64)
         uses: docker/setup-qemu-action@v3
 
       - name: Build tree-sitter in manylinux2014 (glibc 2.17)
@@ -49,9 +49,15 @@ jobs:
           REF: ${{ github.event.inputs.ref || inputs.ref || 'master' }}
           ARCH: ${{ matrix.arch }}
         run: |
+          # Map the manylinux arch to the Rust host target triple.
+          case "${ARCH}" in
+            x86_64|i686|aarch64) RUST="${ARCH}-unknown-linux-gnu" ;;
+            *) echo "unsupported arch: ${ARCH}"; exit 1 ;;
+          esac
           docker build -t "tree-sitter-builder-${ARCH}" \
             --build-arg "REF=${REF}" \
-            --build-arg "TARGET_ARCH=${ARCH}" .
+            --build-arg "TARGET_ARCH=${ARCH}" \
+            --build-arg "RUST_TARGET=${RUST}" .
           CID="$(docker create "tree-sitter-builder-${ARCH}")"
           docker cp "${CID}:/tree-sitter" "${{ runner.temp }}/tree-sitter"
           docker rm "${CID}"
@@ -130,7 +136,7 @@ jobs:
           gh release delete "${TAG}" --yes || true
           gh release create "${TAG}" dist/*.gz \
             --title "${TAG}" \
-            --notes "Prebuilt tree-sitter CLI (manylinux2014, glibc >= 2.17): x86_64, i686, aarch64, armv7l. Source: tree-sitter/tree-sitter @ ${TAG}."
+            --notes "Prebuilt tree-sitter CLI (manylinux2014, glibc >= 2.17): x86_64, i686, aarch64. Source: tree-sitter/tree-sitter @ ${TAG}."
 
       - name: Publish / roll nightly prerelease
         if: steps.meta.outputs.mode == 'nightly'
@@ -146,4 +152,4 @@ jobs:
           gh release create "${TAG}" dist/*.gz \
             --title "nightly ${DATE} (${SHA})" \
             --prerelease \
-            --notes "Nightly prerelease build (manylinux2014, glibc >= 2.17): x86_64, i686, aarch64, armv7l. Source: tree-sitter/tree-sitter @ ${SHA}."
+            --notes "Nightly prerelease build (manylinux2014, glibc >= 2.17): x86_64, i686, aarch64. Source: tree-sitter/tree-sitter @ ${SHA}."
